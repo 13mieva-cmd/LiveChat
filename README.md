@@ -2,6 +2,44 @@
 
 Онлайн-чат поддержки для нескольких сайтов: встраиваемый виджет, единая панель оператора, WebSocket, PostgreSQL и изоляция данных по сайтам.
 
+## Требования
+
+- Node.js 20 или новее.
+- Docker Desktop для локальной базы PostgreSQL: https://www.docker.com/products/docker-desktop/
+
+После установки Docker Desktop откройте приложение один раз и дождитесь статуса **Docker Desktop is running**.
+
+## Локальный запуск
+
+```bash
+git clone https://github.com/13mieva-cmd/LiveChat.git
+cd LiveChat
+cp .env.example .env
+npm install
+docker compose up -d db
+npm run db:migrate
+npm run dev:server
+```
+
+Сервер: http://localhost:3000  
+Проверка: http://localhost:3000/health
+
+При первом запуске создаются владелец из `OWNER_EMAIL` и `OWNER_PASSWORD`, а также два демо-сайта. Их публичные ключи выводятся в лог сервера.
+
+Если Docker не установлен, можно поставить PostgreSQL напрямую:
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb livechat
+```
+
+Затем в `.env` укажите:
+
+```env
+DATABASE_URL=postgres://$(whoami)@localhost:5432/livechat
+```
+
 ## Текущий статус
 
 Реализовано серверное ядро:
@@ -23,20 +61,6 @@
 - Панель оператора — Этап 3.
 - Загрузка изображений и файлов — Этап 4.
 - Оценка диалога, рабочее время, автоприглашения, уведомления — Этап 4.
-
-## Локальный запуск
-
-```bash
-cp .env.example .env
-npm install
-docker compose up -d db
-npm run db:migrate
-npm run dev:server
-```
-
-Сервер: http://localhost:3000
-
-При первом запуске создаются владелец из `OWNER_EMAIL` и `OWNER_PASSWORD`, а также два демо-сайта. Их публичные ключи выводятся в лог сервера.
 
 ## Деплой на Railway
 
