@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: livechat
+      POSTGRES_PASSWORD: livechat
+      POSTGRES_DB: livechat
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livechat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PUBLIC_URL: http://localhost:3000
+      DATABASE_URL: postgres://livechat:livechat@db:5432/livechat
+      OWNER_EMAIL: ${OWNER_EMAIL:-admin@example.com}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-change-me-strong-password}
+      OWNER_NAME: ${OWNER_NAME:-Владелец}
+      JWT_SECRET: ${JWT_SECRET:-replace-with-long-random-secret}
+      MAXMIND_DB_PATH: ${MAXMIND_DB_PATH:-}
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:
