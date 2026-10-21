@@ -1,28 +1,18 @@
-# syntax=docker/dockerfile:1
-FROM node:20-alpine AS build
-WORKDIR /app
-
-COPY package.json package-lock.json* ./
-COPY server/package.json server/
-COPY apps/operator/package.json apps/operator/
-COPY apps/widget/package.json apps/widget/
+FROM node:24-alpine AS build
+WORKDIR /app/server
+COPY server/package.json ./
 RUN npm install
-
-COPY . .
+COPY server/ ./
 RUN npm run build
 
-FROM node:20-alpine
-WORKDIR /app
+FROM node:24-alpine
+WORKDIR /app/server
 ENV NODE_ENV=production
-
-COPY package.json package-lock.json* ./
-COPY server/package.json server/
-COPY --from=build /app/server/dist server/dist
-COPY --from=build /app/server/drizzle server/drizzle
-COPY --from=build /app/apps/operator/dist apps/operator/dist
-COPY --from=build /app/apps/widget/dist apps/widget/dist
-
-RUN cd server && npm install --omit=dev
-
+COPY server/package.json ./
+RUN npm install --omit=dev && npm cache clean --force
+COPY --from=build /app/server/dist ./dist
+COPY server/drizzle ./drizzle
+COPY server/public ./public
+USER node
 EXPOSE 3000
-CMD ["node", "server/dist/index.js"]
+CMD ["node", "dist/index.js"]

@@ -1,0 +1,54 @@
+name: Build and chat checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: livechat
+          POSTGRES_PASSWORD: ci-local-only
+          POSTGRES_DB: livechat_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U livechat -d livechat_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://livechat:ci-local-only@localhost:5432/livechat_test
+      JWT_SECRET: ci-only-not-a-production-secret-change-in-production
+      OWNER_EMAIL: ci@example.com
+      OWNER_PASSWORD: ci-only-test-password
+      PUBLIC_URL: http://localhost:3000
+      PORT: 3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+      - run: npm run build -w server
+      - run: npm test
+      - name: Check standalone browser scripts
+        run: |
+          for file in server/public/*.js; do node --check "$file"; done
+      - name: Start test server and check real messages
+        run: |
+          node server/dist/index.js > /tmp/livechat-ci.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3000/health > /dev/null; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" != 1 ]; then cat /tmp/livechat-ci.log; exit 1; fi
+          SMOKE_ALLOW_WRITE=1 node server/scripts/smoke.mjs
+      - name: Check Docker build
+        run: docker build -t livechat-ci .
