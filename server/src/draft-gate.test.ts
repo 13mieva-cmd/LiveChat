@@ -1,0 +1,15 @@
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {DraftGate,type DraftEvent} from './draft-gate.js';
+
+describe('DraftGate consent and lifecycle',()=>{
+  let events:DraftEvent[],gate:DraftGate;
+  beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-01-01'));events=[];gate=new DraftGate(e=>events.push(e));gate.open('session-a','site-a','dialog-a');});
+  afterEach(()=>{gate.dispose();vi.useRealTimers();});
+  it('blocks drafts by default, including consent on a disabled site',()=>{expect(gate.consent('session-a',true)).toBe(false);expect(gate.update('session-a','secret')).toBe(false);expect(events.some(e=>e.text)).toBe(false);});
+  it('requires a separate consent after enabling the site',()=>{gate.setSiteEnabled('site-a',true);expect(gate.update('session-a','secret')).toBe(false);expect(gate.consent('session-a',true)).toBe(true);expect(gate.update('session-a','hello')).toBe(true);expect(events.at(-1)?.text).toBe('hello');});
+  it('throttles and sends the latest pending text',()=>{gate.setSiteEnabled('site-a',true);gate.consent('session-a',true);gate.update('session-a','a');gate.update('session-a','ab');gate.update('session-a','abc');expect(events.filter(e=>e.text).length).toBe(1);vi.advanceTimersByTime(600);expect(events.filter(e=>e.text).map(e=>e.text)).toEqual(['a','abc']);});
+  it.each(['send','erase','revoke','disconnect','disable','close'] as const)('clears pending text on %s without a delayed leak',action=>{gate.setSiteEnabled('site-a',true);gate.consent('session-a',true);gate.update('session-a','a');gate.update('session-a','pending');if(action==='send')gate.clear('session-a');if(action==='erase')gate.update('session-a','');if(action==='revoke')gate.consent('session-a',false);if(action==='disconnect')gate.close('session-a');if(action==='disable')gate.setSiteEnabled('site-a',false);if(action==='close')gate.closeConversation('dialog-a');const count=events.length;expect(events.at(-1)?.text).toBe('');vi.advanceTimersByTime(20000);expect(events.length).toBe(count);});
+  it('expires and requires new consent after inactivity',()=>{gate.setSiteEnabled('site-a',true);gate.consent('session-a',true);gate.update('session-a','draft');vi.advanceTimersByTime(15000);expect(events.at(-1)?.text).toBe('');expect(gate.update('session-a','new draft')).toBe(false);});
+  it('isolates site settings and resets consent on reconnect',()=>{gate.setSiteEnabled('site-a',true);gate.consent('session-a',true);gate.open('session-b','site-b','dialog-b');expect(gate.consent('session-b',true)).toBe(false);gate.setSiteEnabled('site-b',false);expect(gate.update('session-a','ok')).toBe(true);gate.open('session-a','site-a','dialog-a');expect(gate.update('session-a','blocked')).toBe(false);});
+  it('rejects invalid payloads',()=>{gate.setSiteEnabled('site-a',true);gate.consent('session-a',true);expect(gate.update('session-a',{})).toBe(false);expect(gate.update('session-a','x'.repeat(4001))).toBe(false);expect(gate.update('unknown','text')).toBe(false);});
+});
