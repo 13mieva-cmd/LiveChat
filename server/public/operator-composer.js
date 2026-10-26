@@ -1,4 +1,5 @@
 import './chat-photos.js';
+import './operator-keyboard.js';
 const form=document.querySelector('#composer'),input=document.querySelector('#body'),send=document.querySelector('#send'),cancel=document.querySelector('#cancel'),templates=document.querySelector('#templates');
 if(form&&input&&send&&cancel&&templates){
   const toolbar=templates.parentElement;toolbar.classList.add('composer-toolbar');
