@@ -6,10 +6,12 @@ import { conversationRoutes } from './conversations.js';
 import { quickReplyRoutes } from './quick-replies.js';
 import { pushRoutes } from '../push.js';
 import { photoRoutes } from './photos.js';
+import { profileRoutes } from './profiles.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await app.register(authRoutes, { prefix: '/api' });
   await app.register(siteRoutes, { prefix: '/api' });
+  await app.register(profileRoutes, { prefix: '/api' });
   await app.register(widgetRoutes, { prefix: '/api' });
   await app.register(conversationRoutes, { prefix: '/api' });
   await app.register(quickReplyRoutes, { prefix: '/api' });
