@@ -1,141 +1,35 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { db, sql as databaseSql } from '../db.js';
 import { conversations, messages, messageRevisions, notes, sites, visitors } from '../schema.js';
-import { and, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { requireOperator } from '../auth.js';
 import { editMessageSchema, messageSchema, noteSchema } from '../validation.js';
 import { createMessage } from '../chat-service.js';
 import { broadcast } from '../ws.js';
 
-async function getConversation(id: string) {
-  const [row] = await db.select({ conversation: conversations, site: sites })
-    .from(conversations)
-    .innerJoin(sites, eq(sites.id, conversations.siteId))
-    .where(eq(conversations.id, id))
-    .limit(1);
-  return row ?? null;
-}
-
-export async function conversationRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/conversations', { preHandler: requireOperator }, async (request) => {
-    const query = request.query as { status?: string; siteId?: string; q?: string };
-    const filters = [];
-
-    if (query.status && query.status !== 'all') filters.push(eq(conversations.status, query.status));
-    if (query.siteId) filters.push(eq(conversations.siteId, query.siteId));
-    if (query.q) filters.push(or(ilike(messages.body, `%${query.q}%`), ilike(visitors.token, `%${query.q}%`)));
-
-    return db.select({
-      conversation: conversations,
-      site: sites,
-      visitor: visitors,
-      lastMessage: messages.body,
-      lastMessageAt: messages.createdAt
-    })
-      .from(conversations)
-      .innerJoin(sites, eq(sites.id, conversations.siteId))
-      .innerJoin(visitors, eq(visitors.id, conversations.visitorId))
-      .leftJoin(messages, eq(messages.conversationId, conversations.id))
-      .where(filters.length ? and(...filters) : undefined)
-      .orderBy(desc(conversations.lastActivityAt))
-      .limit(100);
+async function getConversation(id:string){if(!z.string().uuid().safeParse(id).success)return null;const [row]=await db.select({conversation:conversations,site:sites}).from(conversations).innerJoin(sites,eq(sites.id,conversations.siteId)).where(eq(conversations.id,id)).limit(1);return row??null;}
+export async function conversationRoutes(app:FastifyInstance):Promise<void>{
+  await databaseSql`CREATE TABLE IF NOT EXISTS lc_operator_reads (operator_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE, read_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(operator_id,message_id))`;
+  app.get('/conversations',{preHandler:requireOperator},async(request,reply)=>{
+    const parsed=z.object({status:z.enum(['all','new','active','closed','unread','waiting']).optional(),siteId:z.string().uuid().optional(),q:z.string().max(200).optional()}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'Некорректный фильтр'});const query=parsed.data,filters=[];
+    const unread=sql<number>`(SELECT count(*)::int FROM messages unread_message WHERE unread_message.conversation_id=${conversations.id} AND unread_message.sender_type='visitor' AND NOT EXISTS (SELECT 1 FROM lc_operator_reads r WHERE r.message_id=unread_message.id AND r.operator_id=${request.operator!.id}))`.mapWith(Number);
+    const lastSender=sql<string>`(SELECT last_message.sender_type FROM messages last_message WHERE last_message.conversation_id=${conversations.id} ORDER BY last_message.created_at DESC,last_message.id DESC LIMIT 1)`;
+    if(query.status==='unread')filters.push(sql`${unread}>0`);else if(query.status==='waiting')filters.push(and(sql`${lastSender}='visitor'`,sql`${conversations.status}<>'closed'`));else if(query.status&&query.status!=='all')filters.push(eq(conversations.status,query.status));
+    if(query.siteId)filters.push(eq(conversations.siteId,query.siteId));
+    if(query.q){const pattern='%'+query.q+'%';filters.push(sql`(${visitors.token} ILIKE ${pattern} OR EXISTS (SELECT 1 FROM messages searched WHERE searched.conversation_id=${conversations.id} AND searched.body ILIKE ${pattern}))`);}
+    return db.select({conversation:conversations,site:sites,visitor:visitors,unreadCount:unread,lastSenderType:lastSender,lastMessage:sql<string>`(SELECT m.body FROM messages m WHERE m.conversation_id=${conversations.id} ORDER BY m.created_at DESC,m.id DESC LIMIT 1)`,lastMessageAt:sql<string>`(SELECT m.created_at FROM messages m WHERE m.conversation_id=${conversations.id} ORDER BY m.created_at DESC,m.id DESC LIMIT 1)`}).from(conversations).innerJoin(sites,eq(sites.id,conversations.siteId)).innerJoin(visitors,eq(visitors.id,conversations.visitorId)).where(filters.length?and(...filters):undefined).orderBy(desc(conversations.lastActivityAt),desc(conversations.id)).limit(100);
   });
-
-  app.get('/conversations/:id', { preHandler: requireOperator }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const row = await getConversation(id);
-    if (!row) return reply.code(404).send({ error: 'Диалог не найден' });
-
-    const [visitor] = await db.select().from(visitors).where(eq(visitors.id, row.conversation.visitorId));
-    const history = await db.select().from(messages).where(eq(messages.conversationId, id)).orderBy(messages.createdAt);
-    const dialogNotes = await db.select().from(notes).where(eq(notes.conversationId, id)).orderBy(desc(notes.createdAt));
-
-    return { ...row, visitor, messages: history, notes: dialogNotes };
+  app.get('/conversations/:id',{preHandler:requireOperator},async(request,reply)=>{const {id}=request.params as {id:string};const row=await getConversation(id);if(!row)return reply.code(404).send({error:'Диалог не найден'});const [visitor]=await db.select().from(visitors).where(eq(visitors.id,row.conversation.visitorId));const history=await db.select().from(messages).where(eq(messages.conversationId,id)).orderBy(messages.createdAt,messages.id);const dialogNotes=await db.select().from(notes).where(eq(notes.conversationId,id)).orderBy(desc(notes.createdAt));return {...row,visitor,messages:history,notes:dialogNotes};});
+  app.post('/conversations/:id/read',{preHandler:requireOperator},async(request,reply)=>{
+    const {id}=request.params as {id:string};const parsed=z.object({messageIds:z.array(z.string().uuid()).min(1).max(500)}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Некорректные сообщения'});const row=await getConversation(id);if(!row)return reply.code(404).send({error:'Диалог не найден'});
+    const where=and(eq(messages.conversationId,id),eq(messages.senderType,'visitor'),inArray(messages.id,parsed.data.messageIds));
+    const changed=await db.transaction(async tx=>{await tx.execute(sql`INSERT INTO lc_operator_reads(operator_id,message_id) SELECT ${request.operator!.id},${messages.id} FROM ${messages} WHERE ${where} ON CONFLICT(operator_id,message_id) DO NOTHING`);return tx.update(messages).set({status:'read'}).where(and(where,sql`${messages.status}<>'read'`)).returning({id:messages.id});});
+    if(changed.length)broadcast('visitor:'+row.conversation.visitorId,{type:'status_updated',conversationId:id,messageIds:changed.map(m=>m.id),status:'read'});
+    broadcast('operators',{type:'operator_read',conversationId:id,operatorId:request.operator!.id});return {ok:true};
   });
-
-  app.post('/conversations/:id/messages', { preHandler: requireOperator }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const parsed = messageSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Некорректное сообщение' });
-
-    const row = await getConversation(id);
-    if (!row) return reply.code(404).send({ error: 'Диалог не найден' });
-
-    const message = await createMessage({
-      conversationId: id,
-      senderType: 'operator',
-      senderId: request.operator!.id,
-      body: parsed.data.body,
-      clientId: parsed.data.clientId
-    });
-
-    broadcast(`visitor:${row.conversation.visitorId}`, { type: 'message', message: { ...message, senderName: request.operator!.name } });
-    broadcast('operators', { type: 'message', conversationId: id, message: { ...message, senderName: request.operator!.name } });
-    return message;
-  });
-
-  app.patch('/conversations/:id/messages/:messageId', { preHandler: requireOperator }, async (request, reply) => {
-    const { id, messageId } = request.params as { id: string; messageId: string };
-    const parsed = editMessageSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Некорректный текст' });
-
-    const [message] = await db.select().from(messages)
-      .where(and(eq(messages.id, messageId), eq(messages.conversationId, id))).limit(1);
-    if (!message) return reply.code(404).send({ error: 'Сообщение не найдено' });
-    if (message.senderType !== 'operator' || message.senderId !== request.operator!.id) {
-      return reply.code(403).send({ error: 'Можно редактировать только свои сообщения' });
-    }
-
-    await db.insert(messageRevisions).values({ messageId: message.id, previousBody: message.body });
-    const [updated] = await db.update(messages).set({ body: parsed.data.body, edited: true })
-      .where(eq(messages.id, messageId)).returning();
-
-    const row = await getConversation(id);
-    broadcast(`visitor:${row!.conversation.visitorId}`, { type: 'message_updated', message: updated });
-    broadcast('operators', { type: 'message_updated', conversationId: id, message: updated });
-    return updated;
-  });
-
-  app.post('/conversations/:id/:action', { preHandler: requireOperator }, async (request, reply) => {
-    const { id, action } = request.params as { id: string; action: string };
-    const row = await getConversation(id);
-    if (!row) return reply.code(404).send({ error: 'Диалог не найден' });
-
-    if (action === 'close') {
-      const [updated] = await db.update(conversations).set({ status: 'closed', closedAt: new Date() })
-        .where(eq(conversations.id, id)).returning();
-      broadcast(`visitor:${row.conversation.visitorId}`, { type: 'conversation_closed' });
-      return updated;
-    }
-
-    if (action === 'reopen') {
-      return db.update(conversations).set({ status: 'active', closedAt: null })
-        .where(eq(conversations.id, id)).returning();
-    }
-
-    if (action === 'assign') {
-      const parsed = z.object({ assigneeId: z.string().uuid() }).safeParse(request.body);
-      if (!parsed.success) return reply.code(400).send({ error: 'Неверный оператор' });
-      return db.update(conversations).set({ assigneeId: parsed.data.assigneeId })
-        .where(eq(conversations.id, id)).returning();
-    }
-
-    return reply.code(400).send({ error: 'Неизвестное действие' });
-  });
-
-  app.post('/conversations/:id/notes', { preHandler: requireOperator }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const parsed = noteSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Некорректная заметка' });
-
-    const row = await getConversation(id);
-    if (!row) return reply.code(404).send({ error: 'Диалог не найден' });
-
-    return db.insert(notes).values({
-      conversationId: id,
-      authorId: request.operator!.id,
-      body: parsed.data.body
-    }).returning();
-  });
+  app.post('/conversations/:id/messages',{preHandler:requireOperator},async(request,reply)=>{const {id}=request.params as {id:string};const parsed=messageSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Некорректное сообщение'});const row=await getConversation(id);if(!row)return reply.code(404).send({error:'Диалог не найден'});const message=await createMessage({conversationId:id,senderType:'operator',senderId:request.operator!.id,body:parsed.data.body,clientId:parsed.data.clientId});broadcast('visitor:'+row.conversation.visitorId,{type:'message',message:{...message,senderName:request.operator!.name}});broadcast('operators',{type:'message',conversationId:id,message:{...message,senderName:request.operator!.name}});return message;});
+  app.patch('/conversations/:id/messages/:messageId',{preHandler:requireOperator},async(request,reply)=>{const {id,messageId}=request.params as {id:string;messageId:string};if(!z.string().uuid().safeParse(id).success||!z.string().uuid().safeParse(messageId).success)return reply.code(400).send({error:'Некорректный идентификатор'});const parsed=editMessageSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Некорректный текст'});const [message]=await db.select().from(messages).where(and(eq(messages.id,messageId),eq(messages.conversationId,id))).limit(1);if(!message)return reply.code(404).send({error:'Сообщение не найдено'});if(message.senderType!=='operator'||message.senderId!==request.operator!.id)return reply.code(403).send({error:'Можно редактировать только свои сообщения'});await db.insert(messageRevisions).values({messageId:message.id,previousBody:message.body});const [updated]=await db.update(messages).set({body:parsed.data.body,edited:true}).where(eq(messages.id,messageId)).returning();const row=await getConversation(id);broadcast('visitor:'+row!.conversation.visitorId,{type:'message_updated',message:updated});broadcast('operators',{type:'message_updated',conversationId:id,message:updated});return updated;});
+  app.post('/conversations/:id/:action',{preHandler:requireOperator},async(request,reply)=>{const {id,action}=request.params as {id:string;action:string};const row=await getConversation(id);if(!row)return reply.code(404).send({error:'Диалог не найден'});if(action==='close'){const [updated]=await db.update(conversations).set({status:'closed',closedAt:new Date()}).where(eq(conversations.id,id)).returning();broadcast('visitor:'+row.conversation.visitorId,{type:'conversation_closed'});broadcast('operators',{type:'conversation_updated',conversationId:id});return updated;}if(action==='reopen'){const result=await db.update(conversations).set({status:'active',closedAt:null}).where(eq(conversations.id,id)).returning();broadcast('operators',{type:'conversation_updated',conversationId:id});return result;}if(action==='assign'){const parsed=z.object({assigneeId:z.string().uuid()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Неверный оператор'});return db.update(conversations).set({assigneeId:parsed.data.assigneeId}).where(eq(conversations.id,id)).returning();}return reply.code(400).send({error:'Неизвестное действие'});});
+  app.post('/conversations/:id/notes',{preHandler:requireOperator},async(request,reply)=>{const {id}=request.params as {id:string};const parsed=noteSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Некорректная заметка'});const row=await getConversation(id);if(!row)return reply.code(404).send({error:'Диалог не найден'});return db.insert(notes).values({conversationId:id,authorId:request.operator!.id,body:parsed.data.body}).returning();});
 }

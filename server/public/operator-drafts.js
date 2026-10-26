@@ -1,0 +1,10 @@
+const prefix='livechat-operator-draft:';let owner=null;
+const status=document.createElement('small');status.id='draft-status';status.setAttribute('role','status');status.style.cssText='display:block;font-size:11px;color:#64748b;margin:3px 0';document.querySelector('#body').after(status);
+const style=document.createElement('style');style.textContent='.unread-badge{display:inline-block;background:#d92b4c;color:white;font-size:11px;padding:2px 7px;border-radius:999px;margin-left:6px}.waiting-badge{display:block;color:#a75309;font-size:11px;margin-top:4px}.dialog.has-unread{border-left:4px solid #d92b4c}#inbox-summary{display:block;color:#64748b;font-size:12px;margin-bottom:8px}';document.head.append(style);
+function key(id){return prefix+owner+':'+id;}
+export function initDrafts(id){owner=id;try{for(const k of Object.keys(localStorage)){if(!k.startsWith(prefix+owner+':'))continue;try{const value=JSON.parse(localStorage.getItem(k));if(!value||Date.now()-value.updatedAt>7*86400000)localStorage.removeItem(k);}catch{localStorage.removeItem(k);}}}catch{}}
+export function readDraft(id){if(!owner||!id)return '';try{const d=JSON.parse(localStorage.getItem(key(id))||'null');if(!d||typeof d.body!=='string'||Date.now()-d.updatedAt>7*86400000){localStorage.removeItem(key(id));return '';}return d.body.slice(0,4000);}catch{return '';}}
+export function saveDraft(id,body){if(!owner||!id)return;try{if(body)localStorage.setItem(key(id),JSON.stringify({body:body.slice(0,4000),updatedAt:Date.now()}));else localStorage.removeItem(key(id));draftStatus(body?'Черновик сохранён на этом устройстве':'');}catch{draftStatus('Не удалось сохранить черновик в браузере. Не закрывайте страницу.');}}
+export function removeDraft(id){if(!owner||!id)return;try{localStorage.removeItem(key(id));}catch{}}
+export function clearDrafts(){if(!owner)return;try{for(const k of Object.keys(localStorage))if(k.startsWith(prefix+owner+':'))localStorage.removeItem(k);}catch{}}
+export function draftStatus(text){status.textContent=text;}
