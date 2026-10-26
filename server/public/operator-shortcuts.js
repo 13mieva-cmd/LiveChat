@@ -3,7 +3,8 @@ const nav=document.createElement('nav');nav.setAttribute('aria-label','Разд�
 for(const [title,url] of [['Сайты','settings.html'],['Быстрые ответы','replies.html']]){const a=document.createElement('a');a.textContent=title;a.href=url;a.style.color='#5145e5';nav.append(a);}
 $('.inbox').insertBefore(nav,$('.inbox').firstChild);
 const input=$('#body'),select=$('#templates'),form=$('#composer');
-const hint=document.createElement('p');hint.style.cssText='font-size:12px;color:#64748b;margin:6px 0';hint.textContent='Команда шаблона: /hello → Tab. Текст вставляется без отправки.';hint.setAttribute('role','status');input.after(hint);
+const hint=document.createElement('p');hint.id='shortcut-hint';hint.style.cssText='font-size:12px;color:#64748b;margin:6px 0';hint.textContent='Команда шаблона: /hello → Tab. Текст вставляется без отправки.';hint.setAttribute('role','status');form.append(hint);
+const hintStyle=document.createElement('style');hintStyle.textContent='@media(max-width:650px){#shortcut-hint{display:none!important}}';document.head.append(hintStyle);
 let library=[],loading=null;
 async function reload(){const token=sessionStorage.getItem('livechat-operator');if(!token)return;const response=await fetch('/api/quick-replies',{headers:{Authorization:'Bearer '+token}});if(!response.ok)throw new Error('Не удалось загрузить команды шаблонов');library=await response.json();}
 function refresh(){if(!loading)loading=reload().catch(e=>{hint.textContent=e.message;}).finally(()=>loading=null);return loading;}
