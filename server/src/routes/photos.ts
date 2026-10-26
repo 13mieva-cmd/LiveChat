@@ -4,12 +4,13 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { db, sql } from '../db.js';
-import { conversations, sites, visitors } from '../schema.js';
+import { conversations, messages, sites, visitors } from '../schema.js';
 import { requireOperator } from '../auth.js';
 import { getVisitorConversation } from '../chat-service.js';
 import { enqueueVisitorPush } from '../push.js';
 import { broadcast } from '../ws.js';
 
+type PhotoMessage=typeof messages.$inferSelect;
 const maxBytes=1024*1024;
 const configuredQuota=Number(process.env.PHOTO_STORAGE_MB??200);
 const quotaBytes=(Number.isInteger(configuredQuota)&&configuredQuota>=10&&configuredQuota<=2048?configuredQuota:200)*maxBytes;
@@ -23,19 +24,19 @@ async function normalizeImage(data:string){if(data.length%4)throw problem(400,'�
 async function storePhoto(actor:Actor,body:unknown){const parsed=upload.safeParse(body);if(!parsed.success)throw problem(400,'Некорректное изображение');const bytes=await normalizeImage(parsed.data.data);
   const result=await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(734210)`;
-    const [existing]=await tx`SELECT id,conversation_id AS "conversationId",sender_type AS "senderType",sender_id AS "senderId",body,client_id AS "clientId",status,edited,created_at AS "createdAt" FROM messages WHERE conversation_id=${actor.conversationId} AND client_id=${parsed.data.clientId} LIMIT 1`;
+    const [existing]=await tx<PhotoMessage[]>`SELECT id,conversation_id AS "conversationId",sender_type AS "senderType",sender_id AS "senderId",body,client_id AS "clientId",status,edited,created_at AS "createdAt" FROM messages WHERE conversation_id=${actor.conversationId} AND client_id=${parsed.data.clientId} LIMIT 1`;
     if(existing){if(existing.senderType!==actor.senderType||existing.senderId!==actor.senderId)throw problem(409,'Идентификатор отправки уже занят');const [photo]=await tx`SELECT message_id FROM lc_chat_photos WHERE message_id=${existing.id} AND expires_at>now()`;if(!photo)throw problem(409,'Эта отправка уже существует или срок хранения фото истёк');return {message:existing,created:false};}
     await tx`DELETE FROM lc_chat_photos WHERE expires_at<=now()`;
     const [usage]=await tx`SELECT coalesce(sum(octet_length(bytes)),0)::bigint AS size FROM lc_chat_photos`;if(Number(usage.size)+bytes.length>quotaBytes)throw problem(507,'Хранилище фото заполнено. Отправьте текст или используйте мессенджер.');
     const [recent]=actor.senderType==='visitor'?await tx`SELECT count(*)::int AS count FROM lc_chat_photos p JOIN messages m ON m.id=p.message_id WHERE m.conversation_id=${actor.conversationId} AND m.sender_type='visitor' AND p.created_at>now()-interval '1 hour'`:await tx`SELECT count(*)::int AS count FROM lc_chat_photos p JOIN messages m ON m.id=p.message_id WHERE m.sender_id=${actor.senderId} AND p.created_at>now()-interval '1 hour'`;
     if(Number(recent.count)>=(actor.senderType==='visitor'?10:50))throw problem(429,'Слишком много фотографий. Повторите позже.');
     const id=randomUUID(),text='📷 Фото [photo:'+id+']';
-    const [message]=await tx`INSERT INTO messages(id,conversation_id,sender_type,sender_id,body,client_id) VALUES(${id},${actor.conversationId},${actor.senderType},${actor.senderId},${text},${parsed.data.clientId}) RETURNING id,conversation_id AS "conversationId",sender_type AS "senderType",sender_id AS "senderId",body,client_id AS "clientId",status,edited,created_at AS "createdAt"`;
+    const [message]=await tx<PhotoMessage[]>`INSERT INTO messages(id,conversation_id,sender_type,sender_id,body,client_id) VALUES(${id},${actor.conversationId},${actor.senderType},${actor.senderId},${text},${parsed.data.clientId}) RETURNING id,conversation_id AS "conversationId",sender_type AS "senderType",sender_id AS "senderId",body,client_id AS "clientId",status,edited,created_at AS "createdAt"`;
     await tx`INSERT INTO lc_chat_photos(message_id,bytes,expires_at) VALUES(${id},${bytes},now()+interval '30 days')`;
     if(actor.senderType==='visitor')await tx`UPDATE conversations SET last_activity_at=now(),status='active',closed_at=null WHERE id=${actor.conversationId}`;else await tx`UPDATE conversations SET last_activity_at=now() WHERE id=${actor.conversationId}`;
     return {message,created:true};
   });
-  const message={...result.message,...(actor.senderName?{senderName:actor.senderName}:{})};
+  const message:PhotoMessage & {senderName?:string}={...result.message,...(actor.senderName?{senderName:actor.senderName}:{})};
   if(result.created){if(actor.senderType==='visitor')await enqueueVisitorPush(String(message.id),actor.conversationId);broadcast('visitor:'+actor.visitorId,{type:'message',message});broadcast('operators',{type:'message',conversationId:actor.conversationId,message});}
   return {message};
 }
