@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { defaultWorkingHours, minutes, validTimezone } from './schedule.js';
 
 export const messageSchema = z.object({
   clientId: z.string().min(8).max(64),
@@ -6,6 +7,13 @@ export const messageSchema = z.object({
 });
 
 export const draftSchema = z.object({ text: z.string().max(4000) });
+
+const workingHoursSchema = z.object({
+  enabled: z.boolean(),
+  days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  start: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/),
+  end: z.string().regex(/^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00)$/)
+}).refine(value => minutes(value.start) < minutes(value.end), { message: 'Начало работы должно быть раньше конца' });
 
 export const siteSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -28,7 +36,9 @@ export const siteSchema = z.object({
   hiddenPages: z.string().max(2000).default(''),
   autoInviteEnabled: z.boolean().default(false),
   autoInviteDelaySeconds: z.number().int().min(5).max(600).default(30),
-  offlineMessage: z.string().trim().max(500).default('Сейчас мы не в сети. Оставьте сообщение, и мы ответим.'),
+  workingHours: workingHoursSchema.default({ ...defaultWorkingHours, enabled: false }),
+  timezone: z.string().trim().min(1).max(64).refine(validTimezone, { message: 'Неизвестный часовой пояс' }).default('Europe/Minsk'),
+  offlineMessage: z.string().trim().min(1).max(500).default('Сейчас мы не в сети. Оставьте сообщение, и мы ответим.'),
   retentionDays: z.number().int().min(1).max(3650).default(365)
 });
 

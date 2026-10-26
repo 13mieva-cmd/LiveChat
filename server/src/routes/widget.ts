@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { db, sql } from '../db.js';
 import { conversations, messages, sites, visitors } from '../schema.js';
 import { and, asc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { getVisitorConversation } from '../chat-service.js';
 import { lookupGeo } from '../geo.js';
+import { defaultWorkingHours, getAvailability } from '../schedule.js';
 
 function allowed(origin: string | undefined, domain: string): boolean {
   try {
@@ -17,7 +18,8 @@ function allowed(origin: string | undefined, domain: string): boolean {
 }
 function publicSite(site: typeof sites.$inferSelect) {
   const {id,name,color,logoUrl,headerTitle,greeting,position,offsetX,offsetY,quickButtons,offlineMessage,soundEnabled,mobileBehavior,hiddenPages,autoInviteEnabled,autoInviteDelaySeconds} = site;
-  return {id,name,color,logoUrl,headerTitle,greeting,position,offsetX,offsetY,quickButtons,offlineMessage,soundEnabled,mobileBehavior,hiddenPages,autoInviteEnabled,autoInviteDelaySeconds,draftPreviewEnabled:false};
+  const availability = getAvailability(site.workingHours, site.timezone, offlineMessage);
+  return {id,name,color,logoUrl,headerTitle,greeting,position,offsetX,offsetY,quickButtons,offlineMessage,soundEnabled,mobileBehavior,hiddenPages,autoInviteEnabled:autoInviteEnabled&&availability.open,autoInviteDelaySeconds,availability,draftPreviewEnabled:false};
 }
 const initSchema = z.object({
   siteKey:z.string().min(6).max(64),
@@ -27,6 +29,7 @@ const initSchema = z.object({
   utm:z.record(z.string().max(200)).refine(v=>Object.keys(v).length<=20).optional()
 });
 export async function widgetRoutes(app: FastifyInstance): Promise<void> {
+  await sql`UPDATE sites SET working_hours=${JSON.stringify(defaultWorkingHours)}::text::jsonb WHERE working_hours='{}'::jsonb`;
   app.get('/widget/config', async (request, reply) => {
     reply.header('Cache-Control','no-store');
     const parsed=z.object({key:z.string().min(6).max(64)}).safeParse(request.query);
