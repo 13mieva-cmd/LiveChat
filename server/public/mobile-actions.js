@@ -1,6 +1,7 @@
 (() => {
 if(document.querySelector('[data-livechat-actions-style]'))return;
 const helperSource=document.currentScript?.src;
+if(helperSource)void import(new URL('chat-photos.js',helperSource).href).catch(()=>{});
 const style=document.createElement('style');style.dataset.livechatActionsStyle='';
 style.textContent=`@media(max-width:650px){
 [data-livechat-actions]{left:8px!important;right:8px!important;bottom:8px!important;width:auto!important;max-width:none!important;min-width:0!important;transform:none!important;translate:none!important;margin:0!important;border-radius:24px!important;box-sizing:border-box!important;padding:6px 6px max(6px,env(safe-area-inset-bottom))!important}
