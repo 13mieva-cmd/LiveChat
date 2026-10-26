@@ -23,8 +23,8 @@ async function initialize(){
   const [stored]=await sql`SELECT public_key,private_key_encrypted FROM lc_push_keys WHERE id=1`;
   webpush.setVapidDetails(new URL(env.publicUrl).origin,stored.public_key,unseal(stored.private_key_encrypted));publicKey=stored.public_key;ready=true;
 }
-function payload(site:string,test=false){return JSON.stringify({title:test?'LiveChat · Проверка':'LiveChat · '+site.slice(0,80),body:test?'Уведомления подключены':'Новое сообщение от посетителя',url:'/assets/operator.html'});}
-async function deliver(row:any,test=false){return webpush.sendNotification({endpoint:row.endpoint,keys:{p256dh:row.p256dh,auth:row.auth}},payload(row.site_name||'',test),{TTL:3600,urgency:'high',timeout:10000});}
+function payload(site:string,test=false,conversationId?:string){const id=!test&&z.string().uuid().safeParse(conversationId).success?conversationId:null;return JSON.stringify({title:test?'LiveChat · Проверка':'LiveChat · '+site.slice(0,80),body:test?'Уведомления подключены':'Новое сообщение от посетителя',conversationId:id,url:'/assets/operator.html'+(id?'#conversation='+id:'')});}
+async function deliver(row:any,test=false){return webpush.sendNotification({endpoint:row.endpoint,keys:{p256dh:row.p256dh,auth:row.auth}},payload(row.site_name||'',test,row.conversation_id),{TTL:3600,urgency:'high',timeout:10000});}
 export async function enqueueVisitorPush(messageId:string,conversationId:string){
   if(!ready)return;
   try{await sql`INSERT INTO lc_push_jobs(endpoint,message_id,site_name) SELECT p.endpoint,${messageId},s.name FROM lc_push_subscriptions p JOIN users u ON u.id::text=p.user_id CROSS JOIN conversations c JOIN sites s ON s.id=c.site_id WHERE c.id=${conversationId} ON CONFLICT(endpoint,message_id) DO NOTHING`;}catch{console.error('Не удалось поставить push в очередь');}
@@ -38,7 +38,8 @@ async function drain(){
       if(!job)break;
       const [sub]=await sql`SELECT p.* FROM lc_push_subscriptions p JOIN users u ON u.id::text=p.user_id WHERE p.endpoint=${job.endpoint}`;
       if(!sub){await sql`DELETE FROM lc_push_jobs WHERE id=${job.id}`;continue;}
-      try{await deliver({...sub,site_name:job.site_name});await sql`DELETE FROM lc_push_jobs WHERE id=${job.id}`;}catch(error:any){if(error.statusCode===404||error.statusCode===410)await sql`DELETE FROM lc_push_subscriptions WHERE endpoint=${job.endpoint}`;else await sql`UPDATE lc_push_jobs SET next_attempt=now()+${Math.min(3600,15*2**Number(job.attempts))}*interval '1 second' WHERE id=${job.id}`;}
+      const [target]=await sql`SELECT conversation_id FROM messages WHERE id::text=${job.message_id} LIMIT 1`;
+      try{await deliver({...sub,site_name:job.site_name,conversation_id:target?.conversation_id});await sql`DELETE FROM lc_push_jobs WHERE id=${job.id}`;}catch(error:any){if(error.statusCode===404||error.statusCode===410)await sql`DELETE FROM lc_push_subscriptions WHERE endpoint=${job.endpoint}`;else await sql`UPDATE lc_push_jobs SET next_attempt=now()+${Math.min(3600,15*2**Number(job.attempts))}*interval '1 second' WHERE id=${job.id}`;}
     }
   }catch{console.error('Ошибка обработки очереди push');}finally{busy=false;}
 }
