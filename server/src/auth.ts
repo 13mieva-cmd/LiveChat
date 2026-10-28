@@ -30,7 +30,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.patch('/auth/status', { preHandler: requireOperator }, async (request, reply) => {
-    const parsed = z.object({ status: z.enum(['online', 'away', 'offline']) }).safeParse(request.body).data;
+    const parsed = z.object({ status: z.enum(['online', 'away', 'offline']) }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Неверный статус' });
 
     const [user] = await db.update(users).set({ status: parsed.data.status })
