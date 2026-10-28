@@ -1,0 +1,6 @@
+(()=>{
+  let database;
+  function open(){if(!database)database=new Promise((resolve,reject)=>{const request=indexedDB.open('livechat-push-handoff',1);request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains('targets'))request.result.createObjectStore('targets');};request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();database=null;};resolve(db);};request.onerror=()=>{database=null;reject(request.error);};});return database;}
+  async function run(mode,work){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction('targets',mode);let result;tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(tx.error||new Error('Push storage unavailable'));tx.onerror=()=>{};work(tx.objectStore('targets'),value=>{result=value;});});}
+  globalThis.livechatPushHandoff={read:()=>run('readonly',(store,result)=>{const request=store.get('clicked');request.onsuccess=()=>result(request.result||null);}),write:record=>run('readwrite',(store,result)=>{store.put(record,'clicked');result(record);}),ack:nonce=>run('readwrite',store=>{const request=store.get('clicked');request.onsuccess=()=>{const current=request.result;if(current?.nonce===nonce)store.put({...current,done:true},'clicked');};})};
+})();
