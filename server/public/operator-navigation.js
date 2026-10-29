@@ -3,8 +3,7 @@ const valid=id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 const storageKey='livechat-push-target',handoff=globalThis.livechatPushHandoff;
 export function bindNavigation({isReady,openConversation,onError}){
   let pending=null,running=null,retryTimer=null;
-  const status=document.createElement('small');status.id='push-navigation-status';status.setAttribute('role','status');status.style.cssText='display:block;color:#64748b;font-size:11px;overflow-wrap:anywhere;margin:6px 0';document.querySelector('.inbox h2')?.after(status);
-  function report(text){status.textContent='Push 3 · '+text;}report('ожидание нажатия уведомления');
+  function report(text){if(globalThis.LIVECHAT_DEBUG===true)console.debug('[LiveChat navigation]',text);}
   function fromUrl(){const url=new URL(location.href),query=url.searchParams.get('conversation'),hash=new URLSearchParams(url.hash.slice(1)).get('conversation');return valid(query)?query:valid(hash)?hash:null;}
   function remember(id,nonce=null){clearTimeout(retryTimer);if(id&&pending?.id===id&&pending.nonce===nonce)return;pending=id?{id,nonce,attempts:0}:null;try{if(id)sessionStorage.setItem(storageKey,id);else sessionStorage.removeItem(storageKey);}catch{}}
   function clearUrl(id){const url=new URL(location.href);if(url.searchParams.get('conversation')===id)url.searchParams.delete('conversation');if(new URLSearchParams(url.hash.slice(1)).get('conversation')===id)url.hash='';history.replaceState(null,'',url);}
