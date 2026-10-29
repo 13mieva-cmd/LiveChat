@@ -1,0 +1,18 @@
+#theme-toggle{display:inline-flex;align-items:center;justify-content:center;flex:0 0 40px;width:40px;min-width:40px;height:40px;min-height:40px;padding:0;border-radius:12px;background:#eff1fa;color:#5145e5;font-size:23px;line-height:1;touch-action:manipulation}
+#connection{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html:not([data-theme=dark]) #messages{background:#fff}
+html[data-theme=dark]{color-scheme:dark}
+html[data-theme=dark] body,html[data-theme=dark] #boot{background:#10141d!important;color:#e2e8f0!important}
+html[data-theme=dark] header,html[data-theme=dark] aside,html[data-theme=dark] #title,html[data-theme=dark] #composer,html[data-theme=dark] #mobile-back,html[data-theme=dark] #closed-conversation-actions,html[data-theme=dark] .card{background:#191f2b!important;color:#e2e8f0!important;border-color:#343d4f!important}
+html[data-theme=dark] #messages{background:#10141d}
+html[data-theme=dark] input,html[data-theme=dark] textarea,html[data-theme=dark] select,html[data-theme=dark] #composer .photo-compose-row #body{background:#222a38!important;color:#e2e8f0!important;border-color:#3b465a!important}
+html[data-theme=dark] .dialog{background:#191f2b;color:#e2e8f0;border-color:#343d4f}
+html[data-theme=dark] .dialog.active{background:#302953;border-color:#65568f}
+html[data-theme=dark] .message{background:#242d3e;color:#f1f5f9;border-color:#384256}
+html[data-theme=dark] .message.mine{background:#342e59;border-color:#504574}
+html[data-theme=dark] .meta,html[data-theme=dark] .preview,html[data-theme=dark] .details small,html[data-theme=dark] #connection,html[data-theme=dark] #inbox-summary,html[data-theme=dark] #shortcut-hint,html[data-theme=dark] #closed-conversation-actions>span,html[data-theme=dark] .card p,html[data-theme=dark] section[aria-label="Уведомления"] small{color:#acb7c9!important}
+html[data-theme=dark] .brand,html[data-theme=dark] .edit,html[data-theme=dark] .inbox nav a{color:#b7adff!important}
+html[data-theme=dark] #logout,html[data-theme=dark] #sound-toggle,html[data-theme=dark] #theme-toggle,html[data-theme=dark] #composer #cancel,html[data-theme=dark] #composer #close,html[data-theme=dark] .dialog-finish,html[data-theme=dark] .photo-attach,html[data-theme=dark] section[aria-label="Уведомления"] button{background:#293245!important;color:#d9e2f5!important;border-color:#3b465a!important}
+html[data-theme=dark] #delete-dialog,html[data-theme=dark] .dialog-remove{background:#42212b!important;color:#ffb7c5!important;border-color:#70404c!important}
+html[data-theme=dark] .note{background:#3a301b;color:#f7e7bb}
+html[data-theme=dark] #error{background:#8e2540!important;color:#fff!important}
