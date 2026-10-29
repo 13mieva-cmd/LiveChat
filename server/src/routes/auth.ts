@@ -4,14 +4,18 @@ import { users } from '../schema.js';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { signOperatorToken, requireOperator } from '../auth.js';
+import { createOperatorSession, registerOperatorSessionRoutes, sessionOriginAllowed } from '../operator-sessions.js';
 import { z } from 'zod';
 
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6).max(200) });
+const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6).max(200), remember: z.boolean().optional().default(false) });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+  await registerOperatorSessionRoutes(app);
   app.post('/auth/login', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Неверный email или пароль' });
+    if (parsed.data.remember && !sessionOriginAllowed(request)) return reply.code(403).send({ error: 'Недопустимый источник запроса' });
 
     const [user] = await db.select().from(users).where(eq(users.email, parsed.data.email.toLowerCase())).limit(1);
     if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
@@ -19,7 +23,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return {
-      token: signOperatorToken({ sub: user.id, email: user.email }),
+      token: parsed.data.remember ? await createOperatorSession(user, reply) : signOperatorToken({ sub: user.id, email: user.email }),
       user: { id: user.id, email: user.email, name: user.name, status: user.status }
     };
   });

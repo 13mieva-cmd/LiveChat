@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import { db } from './db.js';
 import { conversations,messages,sites,visitors,users } from './schema.js';
 import { and,eq,desc,inArray } from 'drizzle-orm';
-import { verifyOperatorToken } from './auth.js';
+import { verifyOperatorToken, operatorPayloadActive } from './auth.js';
 import { createMessage } from './chat-service.js';
 import { messageSchema } from './validation.js';
 import { env } from './env.js';
@@ -32,19 +32,27 @@ export function setupWs(server:Server):void {
   wss.on('connection',(ws,request)=>{
     const sessionId=randomUUID();
     let ready=false,visitorId:string|null=null,operatorId:string|null=null,draftConversation:string|null=null;
+    let operatorToken:string|null=null,authTimer:ReturnType<typeof setInterval>|undefined;
     let count=0,resetAt=Date.now()+60000,chain=Promise.resolve();
     const send=(value:unknown)=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
     const reset=()=>{gate.close(sessionId);draftConversation=null;send({type:'draft_consent',allowed:false});};
+    const validateOperator=async()=>{
+      if(!operatorToken)return false;
+      const payload=verifyOperatorToken(operatorToken);
+      return !!payload&&await operatorPayloadActive(payload);
+    };
     ws.on('error',()=>{});
-    ws.on('close',()=>{gate.close(sessionId);visitorConnections.delete(ws);for(const [room,sockets] of rooms){sockets.delete(ws);if(!sockets.size)rooms.delete(room);}});
+    ws.on('close',()=>{clearInterval(authTimer);gate.close(sessionId);visitorConnections.delete(ws);for(const [room,sockets] of rooms){sockets.delete(ws);if(!sockets.size)rooms.delete(room);}});
     const authentication=(async()=>{
       const url=new URL(request.url??'/','http://localhost'),token=url.searchParams.get('token');
       if(token){
         const payload=verifyOperatorToken(token);
-        if(!payload||!allowed(request.headers.origin,env.publicUrl))return ws.close(4003,'Доступ запрещён');
+        if(!payload||!allowed(request.headers.origin,env.publicUrl)||!(await operatorPayloadActive(payload)))return ws.close(4003,'Доступ запрещён');
         const [user]=await db.select().from(users).where(eq(users.id,payload.sub)).limit(1);
-        if(!user)return ws.close(4003,'Доступ запрещён');operatorId=user.id;
+        if(!user)return ws.close(4003,'Доступ запрещён');operatorId=user.id;operatorToken=token;
         if(ws.readyState!==WebSocket.OPEN)return;join('operators',ws);
+        authTimer=setInterval(()=>{void validateOperator().then(active=>{if(!active)ws.close(4003,'Сессия завершена');}).catch(()=>ws.close(1011,'Ошибка проверки сессии'));},60000);
+        authTimer.unref();
       }else{
         const key=url.searchParams.get('siteKey'),token=url.searchParams.get('visitorToken');
         if(!key||!token||key.length>64||token.length>64)return ws.close(4003,'Доступ запрещён');
@@ -58,6 +66,7 @@ export function setupWs(server:Server):void {
     })().catch(()=>ws.close(1011,'Ошибка подключения'));
     async function handle(data:any):Promise<void>{
       await authentication;if(!ready||ws.readyState!==WebSocket.OPEN||!data||typeof data!=='object')return;
+      if(operatorId&&!(await validateOperator())){ws.close(4003,'Сессия завершена');return;}
       if(data.type==='draft_consent'&&data.allowed===false){reset();return;}
       let conversation;
       if(visitorId)[conversation]=await db.select().from(conversations).where(eq(conversations.visitorId,visitorId)).orderBy(desc(conversations.createdAt)).limit(1);
