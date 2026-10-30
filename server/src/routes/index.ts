@@ -8,6 +8,7 @@ import { pushRoutes } from '../push.js';
 import { photoRoutes } from './photos.js';
 import { profileRoutes } from './profiles.js';
 import { deleteConversationRoutes } from './delete-conversation.js';
+import { presenceRoutes } from './presence.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await app.register(authRoutes, { prefix: '/api' });
@@ -19,4 +20,5 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await app.register(pushRoutes, { prefix: '/api' });
   await app.register(photoRoutes, { prefix: '/api' });
   await app.register(deleteConversationRoutes, { prefix: '/api' });
+  await app.register(presenceRoutes, { prefix: '/api' });
 }

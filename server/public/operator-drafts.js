@@ -1,3 +1,4 @@
+import './operator-presence.js';
 const prefix='livechat-operator-draft:';let owner=null;
 const status=document.createElement('small');status.id='draft-status';status.setAttribute('role','status');status.style.cssText='display:block;font-size:11px;color:#64748b;margin:3px 0';document.querySelector('#composer').append(status);
 const style=document.createElement('style');style.textContent='#draft-status:empty{display:none!important}.unread-badge{display:inline-block;background:#d92b4c;color:white;font-size:11px;padding:2px 7px;border-radius:999px;margin-left:6px}.waiting-badge{display:block;color:#a75309;font-size:11px;margin-top:4px}.dialog.has-unread{border-left:4px solid #d92b4c}#inbox-summary{display:block;color:#64748b;font-size:12px;margin-bottom:8px}';document.head.append(style);

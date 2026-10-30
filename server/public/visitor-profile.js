@@ -12,3 +12,12 @@ if(root&&embed&&!root.querySelector('.profile-tools')){
   toggle.onclick=async()=>{if(busy)return;dialog.showModal();status.textContent='Загружаем…';lock(true);try{const data=await request('/read',{});name.value=data.name||'';phone.value=data.phone||'';status.textContent='';}catch(error){status.textContent=error.message;}finally{lock(false);}};
   form.onsubmit=async event=>{event.preventDefault();if(busy)return;lock(true);status.textContent='Сохраняем…';try{await request('',{name:name.value.trim(),phone:phone.value.trim()});toggle.textContent='Мои контакты';dialog.close();}catch(error){status.textContent=error.message;}finally{lock(false);}};
 }
+if(root&&embed&&!host.hasAttribute('data-presence-started')){
+  host.setAttribute('data-presence-started','');const key=embed.dataset.siteKey,tabId=crypto.randomUUID();let seq=0,busy=false,leaving=false,lastPage='';
+  function payload(state){let token;try{token=JSON.parse(localStorage.getItem('livechat:'+key+':token')||'null');}catch{}if(!token)return null;const url=new URL(location.href);url.search='';url.hash='';return {siteKey:key,visitorToken:token,tabId,seq:++seq,state,url:url.href,title:document.title.slice(0,160)};}
+  async function beat(){if(busy||leaving)return;const data=payload(document.hidden?'hidden':'visible');if(!data)return;busy=true;try{const r=await fetch(origin+'/api/widget/presence',{method:'POST',credentials:'omit',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(10000)});if(r.ok)lastPage=data.url+'|'+data.title;}catch{}finally{busy=false;}}
+  document.addEventListener('visibilitychange',()=>void beat());
+  window.addEventListener('pagehide',()=>{leaving=true;const data=payload('left');if(data)try{navigator.sendBeacon(origin+'/api/widget/presence',new Blob([JSON.stringify(data)],{type:'text/plain;charset=UTF-8'}));}catch{}});
+  window.addEventListener('pageshow',()=>{leaving=false;void beat();});window.addEventListener('online',()=>void beat());window.addEventListener('popstate',()=>void beat());window.addEventListener('hashchange',()=>void beat());
+  setInterval(()=>void beat(),20000);setInterval(()=>{if(document.hidden||leaving)return;const u=new URL(location.href);u.search='';u.hash='';if(u.href+'|'+document.title.slice(0,160)!==lastPage)void beat();},2000);void beat();
+}
